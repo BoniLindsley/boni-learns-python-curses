@@ -11,17 +11,13 @@ import os
 import signal
 import sys
 import threading
+import types
 import typing
 
 # In Windows native, need windows-curses
 
 # In MSYS2, might need
 # export TERMINFO=$MSYSTEM_PREFIX/share/terminfo
-
-# Coroutines
-#
-# - yield future
-# - yield from other_coroutine()
 
 _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -34,7 +30,7 @@ _Copyable = typing.TypeVar("_Copyable", bound="Copyable")
 
 Coroutine = collections.abc.Generator[
     "Future[typing.Any]",  # Yield type
-    typing.Any,  # Send type
+    None,  # Send type
     _T,  # Return type
 ]
 
@@ -64,14 +60,19 @@ class _FutureCancelled:
 
 
 class _FutureException:
-    exception: Exception
+    exception: BaseException
 
 
 class _FutureResult(typing.Generic[_T]):
     result: _T
 
 
-_FutureState = _FutureWaiting | _FutureCancelled | _FutureException | _FutureResult[_T]
+_FutureState = (
+    _FutureWaiting
+    | _FutureCancelled
+    | _FutureException
+    | _FutureResult[_T]
+)
 
 
 def cut(source: _Copyable) -> _Copyable:
@@ -81,7 +82,10 @@ def cut(source: _Copyable) -> _Copyable:
         source.clear()
 
 
-class Future(collections.abc.Iterator[_T]):
+class Future(Coroutine[_T]):
+
+    __Self = typing.TypeVar("__Self", bound="Future[_T]")
+
     _state: _FutureState[_T] = _FutureWaiting()
 
     def __init__(
@@ -95,9 +99,6 @@ class Future(collections.abc.Iterator[_T]):
         if loop is None:
             loop = get_running_loop()
         self._loop: "EventLoop" = loop
-
-    def __next__(self: _T) -> _T:
-        return self
 
     def result(self) -> _T:
         state = self._state
@@ -116,7 +117,7 @@ class Future(collections.abc.Iterator[_T]):
         _state.result = result
         self._call_done_callbacks()
 
-    def set_exception(self, exception: Exception) -> None:
+    def set_exception(self, exception: BaseException) -> None:
         if self.done():
             raise InvalidStateError()
         _state = self._state = _FutureException()
@@ -158,7 +159,7 @@ class Future(collections.abc.Iterator[_T]):
         for callback in self._done_callbacks.copy():
             loop.call_soon(callback, self)
 
-    def exception(self) -> Exception | None:
+    def exception(self) -> BaseException | None:
         state = self._state
         if isinstance(state, _FutureResult):
             return None
@@ -171,12 +172,34 @@ class Future(collections.abc.Iterator[_T]):
     def get_loop(self) -> "EventLoop":
         return self._loop
 
+    def send(self: __Self, value: None) -> __Self:
+        assert value is None, "Futures do not receive sent values."
+        del value
+        if self.done():
+            raise StopIteration(self.result())
+        return self
+
+    def throw(
+        self,
+        typ: BaseException | type[BaseException] | None = None,
+        val: object | None = None,
+        tb: types.TracebackType | None = None,
+    ) -> typing.Any:
+        del tb
+        assert typ is not None
+        if isinstance(typ, GeneratorExit):
+            return
+        raise typ
+
 
 class _TaskCancelling(_FutureWaiting):
     pass
 
 
 class Task(Future[_T]):
+
+    __Self = typing.TypeVar("__Self", bound="Task[_T]")
+
     def __init__(
         self,
         coro: Coroutine[_T],
@@ -186,6 +209,8 @@ class Task(Future[_T]):
         super().__init__(*args, **kwargs)
         self._coro = coro
         self._awaited_on: Future[typing.Any] | None = None
+
+        self.counter = 1
 
     def cancel(self) -> bool:
         if self.done():
@@ -198,27 +223,18 @@ class Task(Future[_T]):
                 awaited_on.cancel()
         return True
 
-    def send(self, value: None) -> None:
+    def send(self: __Self, value: None) -> __Self:
         assert value is None, "Tasks do not receive sent values."
-        del value
         if isinstance(self._state, _FutureCancelled):
             self.throw(CancelledError())
-            return
-        result = None
-        awaited_on = self._awaited_on
-        if awaited_on is not None:
-            assert awaited_on.done(), "Do not send to not ready tasks."
-            try:
-                result = awaited_on.result()
-            except Exception as error:  # pylint: disable=broad-except
-                self.throw(error)  # Forwarding all exceptions.
-                return
-        self._step_coro(
-            functools.partial(
-                self.get_coro().send,
-                result,
+        else:
+            self._step_coro(
+                functools.partial(
+                    self.get_coro().send,
+                    value,
+                )
             )
-        )
+        return super().send(value)
 
     def _is_send_ready(self) -> bool:
         if self.done():
@@ -230,11 +246,22 @@ class Task(Future[_T]):
             return True
         return awaited_on.done()
 
-    def throw(self, exception: Exception) -> None:
+    def throw(
+        self,
+        typ: BaseException | type[BaseException] | None = None,
+        val: object | None = None,
+        tb: types.TracebackType | None = None,
+    ) -> typing.Any:
+        del tb
+        assert typ is not None
+        if isinstance(typ, type):
+            assert val is not None
+            assert isinstance(val, typ)
+            typ = val
         self._step_coro(
             functools.partial(
                 self.get_coro().throw,
-                exception,
+                typ,
             )
         )
 
@@ -250,13 +277,16 @@ class Task(Future[_T]):
 
         try:
             self._awaited_on = stepper()
+            self.counter += 1
+            if self.counter > 5:
+                raise CancelledError()
         except StopIteration as error:
             self.set_result(error.value)
             raise
         except CancelledError as error:
             super().cancel()
             raise StopIteration() from error
-        except Exception as error:
+        except BaseException as error:
             self.set_exception(error)
             raise StopIteration() from error
 
@@ -266,7 +296,9 @@ class Task(Future[_T]):
 
 class EventLoop:
 
-    unpause_signal = signal.SIGINT if os.name != "nt" else signal.CTRL_C_EVENT
+    unpause_signal = (
+        signal.SIGINT if os.name != "nt" else signal.CTRL_C_EVENT
+    )
     _instance: "EventLoop" | None = None
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -277,9 +309,8 @@ class EventLoop:
         self._is_stopping = False
         self._is_waiting = False
         self._pid = os.getpid()
-        self._send_ready_tasks: list[Task[typing.Any]] = []
         self._all_tasks: list[Task[typing.Any]] = []
-        self._stdscr = None
+        self._stdscr: curses.window | None = None
 
     def open(self) -> curses.window:
         stdscr = self._stdscr
@@ -297,15 +328,28 @@ class EventLoop:
         self.run_until_complete(self.create_future())
 
     def run_until_complete(self, future: Future[_T]) -> _T | None:
+        all_tasks = self._all_tasks
         try:
+            # Always iterate once before exiting.
             while True:
-                self._send_ready_tasks.extend(
-                    task for task in self._all_tasks.copy() if task._is_send_ready()
+                ready_tasks = (
+                    task
+                    for task in all_tasks
+                    if task._is_send_ready()  # pylint: disable=protected-access
                 )
-                if not self._send_ready_tasks:
-                    self._set_getch_result()
+                has_ready = False
+                for task in ready_tasks:
+                    has_ready = True
+                    try:
+                        task.send(None)
+                    except StopIteration:
+                        pass
+                if has_ready:
+                    all_tasks[:] = [
+                        task for task in all_tasks if not task.done()
+                    ]
                 else:
-                    self._step_send_ready_tasks()
+                    self._set_getch_result()
                 if future.done():
                     return future.result()
                 if self._is_stopping:
@@ -313,14 +357,6 @@ class EventLoop:
         finally:
             self._is_stopping = False
         return None
-
-    def _step_send_ready_tasks(self) -> None:
-        all_tasks = self._all_tasks
-        for task in cut(self._send_ready_tasks):
-            try:
-                task.send(None)
-            except StopIteration:
-                all_tasks.remove(task)
 
     def stop(self) -> None:
         self._is_stopping = True
@@ -336,7 +372,7 @@ class EventLoop:
         curses.nocbreak()
         curses.echo()
         curses.endwin()
-        self._stdscr: curses.window | None = None
+        self._stdscr = None
 
     def call_soon(
         self,
@@ -350,9 +386,9 @@ class EventLoop:
             return
             # Force function into a zero-step generator.
             assert False, "Unreachable."  # pylint: disable=unreachable
-            yield self.create_future()
+            yield from self.create_future()
 
-        self.create_task(wrapped_callback()),
+        self.create_task(wrapped_callback())
 
     def create_future(self) -> Future[_T]:
         return Future[_T](loop=self)
@@ -375,8 +411,9 @@ class EventLoop:
         future = self._getch_future
         if future is None:
             future = self._getch_future = Future[int](loop=self)
-        next_ch = yield future
-        return typing.cast(int, next_ch)
+        # return (yield from future)
+        next_ch = yield from future
+        return next_ch
 
     def _set_getch_result(self) -> None:
         stdscr = self._stdscr
@@ -418,16 +455,15 @@ def main() -> int:
     try:
         stdscr = loop.open()
         timer = threading.Timer(
-            2,
+            1,
             lambda: loop.call_soon_threadsafe(stdscr.addstr, 7, 0, "x"),
         )
         timer.start()
         task = loop.create_task(print_keys())
-        loop.run_until_complete(task)
-        # for i in range(5):
-        #     next_char = stdscr.getch()
-        #     stdscr.addstr(i, 0, str(next_char))
-        #     stdscr.noutrefresh()
+        try:
+            loop.run_until_complete(task)
+        except CancelledError:
+            pass
         timer.join()
     finally:
         loop.close()
