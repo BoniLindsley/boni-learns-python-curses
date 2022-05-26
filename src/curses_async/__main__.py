@@ -210,8 +210,6 @@ class Task(Future[_T]):
         self._coro = coro
         self._awaited_on: Future[typing.Any] | None = None
 
-        self.counter = 1
-
     def cancel(self) -> bool:
         if self.done():
             return False
@@ -277,9 +275,6 @@ class Task(Future[_T]):
 
         try:
             self._awaited_on = stepper()
-            self.counter += 1
-            if self.counter > 5:
-                raise CancelledError()
         except StopIteration as error:
             self.set_result(error.value)
             raise
@@ -450,23 +445,19 @@ def print_keys() -> Coroutine[None]:
         stdscr.noutrefresh()
 
 
-def main() -> int:
+def run(coro: Coroutine[_T]) -> _T | None:
     loop = EventLoop()
     try:
         stdscr = loop.open()
-        timer = threading.Timer(
-            1,
-            lambda: loop.call_soon_threadsafe(stdscr.addstr, 7, 0, "x"),
-        )
-        timer.start()
-        task = loop.create_task(print_keys())
-        try:
-            loop.run_until_complete(task)
-        except CancelledError:
-            pass
-        timer.join()
+        task = loop.create_task(coro)
+        return loop.run_until_complete(task)
     finally:
         loop.close()
+    return 0
+
+
+def main() -> int:
+    run(print_keys())
     return 0
 
 
