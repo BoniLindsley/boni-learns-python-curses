@@ -1,0 +1,21 @@
+[project]
+name = "boni-curses-async"
+version = "0.0.1"
+description = "Event loop for curses with deprecated async generators"
+requires-python = ">= 3.10"
+license.text = "MIT"
+dependencies = [
+  "windows-curses >= 2.3.0; platform_system == 'Windows'",
+]
+
+[[project.authors]]
+name = "Boni Lindsley"
+email = "boni@lindsley.xyz"
+
+[project.optional-dependencies]
+dev = [
+  "black >= 22.3.0",
+  "mypy >= 0.960",
+  "pylint >= 2.13.9",
+  "pytest >= 7.1.2",
+]
