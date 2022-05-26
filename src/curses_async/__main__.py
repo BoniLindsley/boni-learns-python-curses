@@ -10,7 +10,6 @@ import logging
 import os
 import signal
 import sys
-import threading
 import types
 import typing
 
@@ -448,12 +447,11 @@ def print_keys() -> Coroutine[None]:
 def run(coro: Coroutine[_T]) -> _T | None:
     loop = EventLoop()
     try:
-        stdscr = loop.open()
+        loop.open()
         task = loop.create_task(coro)
         return loop.run_until_complete(task)
     finally:
         loop.close()
-    return 0
 
 
 def main() -> int:
