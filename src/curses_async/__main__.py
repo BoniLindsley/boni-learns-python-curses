@@ -22,10 +22,11 @@ def print_state() -> curses_async.Coroutine[None]:
     stdscr = loop.open()
     stdscr.clear()
     for counter in range(10):
+        if counter:
+            stdscr.addstr(0, 0, str(counter))
+            stdscr.noutrefresh()
         curses.doupdate()
         yield from loop.getch()
-        stdscr.addstr(0, 0, str(counter))
-        stdscr.noutrefresh()
 
 
 def main() -> int:
