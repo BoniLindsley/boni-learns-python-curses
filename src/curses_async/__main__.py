@@ -2,8 +2,10 @@
 
 # Standard libraries.
 import curses
+import curses.textpad
 import logging
 import sys
+import typing
 
 # Internal dependencies.
 import curses_async
@@ -17,16 +19,30 @@ _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 
+class StatusLine:
+    def __init__(
+        self, *args: typing.Any, parent: curses.window, **kwargs: typing.Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        height, width = parent.getmaxyx()
+        self.window = parent.derwin(1, width, height - 1, 0)
+        self.textbox = curses.textpad.Textbox(self.window)
+
+
 def print_state() -> curses_async.Coroutine[None]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
     stdscr.clear()
-    for counter in range(10):
+    status_line = StatusLine(parent=stdscr)
+    for counter in range(3):
         if counter:
             stdscr.addstr(0, 0, str(counter))
             stdscr.noutrefresh()
         curses.doupdate()
-        yield from loop.getch()
+        next_key = yield from loop.getch()
+        if next_key == ord(":"):
+            status_line.textbox.do_command(":")
+            status_line.textbox.edit()
 
 
 def main() -> int:
