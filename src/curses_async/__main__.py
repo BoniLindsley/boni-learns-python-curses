@@ -41,6 +41,7 @@ def print_state() -> curses_async.Coroutine[None]:
         curses.doupdate()
         next_key = yield from loop.getch()
         if next_key == ord(":"):
+            message_area.window.clear()
             message_area.textbox.do_command(":")
             message_area.textbox.edit()
 
