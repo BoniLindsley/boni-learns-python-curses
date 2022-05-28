@@ -19,7 +19,7 @@ _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 
-class StatusLine:
+class MessageArea:
     def __init__(
         self, *args: typing.Any, parent: curses.window, **kwargs: typing.Any
     ) -> None:
@@ -33,7 +33,7 @@ def print_state() -> curses_async.Coroutine[None]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
     stdscr.clear()
-    status_line = StatusLine(parent=stdscr)
+    message_area = MessageArea(parent=stdscr)
     for counter in range(3):
         if counter:
             stdscr.addstr(0, 0, str(counter))
@@ -41,8 +41,8 @@ def print_state() -> curses_async.Coroutine[None]:
         curses.doupdate()
         next_key = yield from loop.getch()
         if next_key == ord(":"):
-            status_line.textbox.do_command(":")
-            status_line.textbox.edit()
+            message_area.textbox.do_command(":")
+            message_area.textbox.edit()
 
 
 def main() -> int:
