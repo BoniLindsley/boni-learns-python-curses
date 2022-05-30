@@ -18,6 +18,16 @@ import curses_async
 _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+NullaryCallable = typing.Callable[[], typing.Any]
+
+
+def noop() -> None:
+    pass
+
+
+def stop_running_loop() -> None:
+    curses_async.get_running_loop().stop()
+
 
 class MessageArea:
     def __init__(
@@ -29,25 +39,45 @@ class MessageArea:
         self.textbox = curses.textpad.Textbox(self.window)
 
 
-def print_state() -> curses_async.Coroutine[None]:
+command_map: dict[str, NullaryCallable] = {
+    "q": stop_running_loop,
+    "quit": stop_running_loop,
+}
+
+
+def handle_in_command_line_mode(
+    *, message_area: MessageArea, next_key: int
+) -> None:
+    def echo(next_char: str) -> str:
+        stdscr = curses_async.get_running_loop().open()
+        stdscr.addstr(0, 0, message_area.textbox.gather() + "==")
+        stdscr.noutrefresh()
+        return next_char
+
+    message_area.window.clear()
+    message_area.textbox.do_command(next_key)
+    command = message_area.textbox.edit(echo)[1:-1]
+    command_map.get(command, noop)()
+
+
+def async_main() -> curses_async.Coroutine[None]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
     stdscr.clear()
     message_area = MessageArea(parent=stdscr)
     for counter in range(3):
-        if counter:
-            stdscr.addstr(0, 0, str(counter))
-            stdscr.noutrefresh()
+        stdscr.addstr(0, 0, str(counter))
+        stdscr.noutrefresh()
         curses.doupdate()
-        next_key = yield from loop.getch()
-        if next_key == ord(":"):
-            message_area.window.clear()
-            message_area.textbox.do_command(":")
-            message_area.textbox.edit()
+        next_char = yield from loop.getch()
+        if next_char == ord(":"):
+            handle_in_command_line_mode(
+                message_area=message_area, next_key=next_char
+            )
 
 
 def main() -> int:
-    curses_async.run(print_state())
+    curses_async.run(async_main())
     return 0
 
 
