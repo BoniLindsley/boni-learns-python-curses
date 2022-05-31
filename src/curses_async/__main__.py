@@ -57,12 +57,18 @@ class Typeahead:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         self._cache = collections.deque[int | str]()
+        self._cache_repeat_count = 0
 
     def getch(self) -> curses_async.Coroutine[int]:
+        """
+        :return: Cached input character or retrieve from ``curses``.
+        :raise RecursionError: See ``popleft``.
+        """
         try:
             return self.popleft()
         except IndexError:
             pass
+        self._cache_repeat_count = 0
         curses.doupdate()
         return (yield from curses_async.get_running_loop().getch())
 
@@ -70,7 +76,17 @@ class Typeahead:
         """
         :return: Next cached input character.
         :raise IndexError: If cache is empty.
+        :raise RecursionError:
+            If popleft is used a certain number of times
+            without getch redirecting to user input.
+            This is to prevent map recursion causing infinite loops.
+            The limit is currently set as ``sys.getrecursionlimit()``.
         """
+        self._cache_repeat_count += 1
+        if self._cache_repeat_count > sys.getrecursionlimit():
+            raise RecursionError(
+                "Too many uses of Typeahead cache without user input.",
+            )
         next_entry = self._cache.popleft()
         if isinstance(next_entry, int):
             return next_entry
