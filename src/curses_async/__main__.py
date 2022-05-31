@@ -32,7 +32,10 @@ def stop_running_loop() -> None:
 
 class MessageArea:
     def __init__(
-        self, *args: typing.Any, parent: curses.window, **kwargs: typing.Any
+        self,
+        *args: typing.Any,
+        parent: curses.window,
+        **kwargs: typing.Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         height, width = parent.getmaxyx()
@@ -56,6 +59,7 @@ class Typeahead:
             return self.popleft()
         except IndexError:
             pass
+        curses.doupdate()
         return (yield from curses_async.get_running_loop().getch())
 
     def popleft(self) -> int:
@@ -75,24 +79,23 @@ class Typeahead:
         self._cache.appendleft(next_entry)
 
 
-def handle_in_command_line_mode(
+def get_command_in_command_line_mode(
     *, message_area: MessageArea, typeahead: Typeahead
-) -> curses_async.Coroutine[None]:
-    stdscr = curses_async.get_running_loop().open()
+) -> curses_async.Coroutine[str]:
     textbox = message_area.textbox
     window = message_area.window
     window.clear()
     while True:
-        curses.doupdate()
         next_key = yield from typeahead.getch()
         if next_key == 7:
+            window.clear()
             break
         if next_key == 10:
             break
         textbox.do_command(next_key)
         window.noutrefresh()
-    command = textbox.gather()
-    command_map.get(command[1:-1], noop)()
+    window.noutrefresh()
+    return textbox.gather()
 
 
 def async_main() -> curses_async.Coroutine[None]:
@@ -104,14 +107,14 @@ def async_main() -> curses_async.Coroutine[None]:
     for counter in range(3):
         stdscr.addstr(0, 0, str(counter))
         stdscr.noutrefresh()
-        curses.doupdate()
         next_char = yield from typeahead.getch()
         if next_char == ord(":"):
             typeahead.appendleft(next_char)
-            yield from handle_in_command_line_mode(
+            command = yield from get_command_in_command_line_mode(
                 message_area=message_area,
                 typeahead=typeahead,
             )
+            command_map.get(command[1:-1], noop)()
 
 
 def main() -> int:
