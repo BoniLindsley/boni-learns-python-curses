@@ -119,7 +119,7 @@ def process_command_in_normal_mode(
         curses.beep()
 
 
-def async_main() -> curses_async.Coroutine[None]:
+def async_main() -> curses_async.Coroutine[int]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
     stdscr.clear()
@@ -140,11 +140,12 @@ def async_main() -> curses_async.Coroutine[None]:
             yield from process_command_in_normal_mode(
                 typeahead=typeahead,
             )
+    return 0
 
 
 def main() -> int:
-    curses_async.run(async_main())
-    return 0
+    return_value = curses_async.run(async_main())
+    return return_value if return_value is not None else 1
 
 
 if __name__ == "__main__":
