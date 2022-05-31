@@ -48,6 +48,10 @@ command_map: dict[str, NullaryCallable] = {
     "quit": stop_running_loop,
 }
 
+key_map: dict[str, str] = {
+    "ZZ": ":q\n",
+}
+
 
 class Typeahead:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -98,6 +102,23 @@ def get_command_in_command_line_mode(
     return textbox.gather()
 
 
+def process_command_in_normal_mode(
+    *, typeahead: Typeahead
+) -> curses_async.Coroutine[None]:
+    sequences = list(key_map.keys())
+    buffer = ""
+    while sequences:
+        next_ch = yield from typeahead.getch()
+        buffer += chr(next_ch)
+        new_typeahead_entry = key_map.get(buffer)
+        if new_typeahead_entry is not None:
+            typeahead.appendleft(new_typeahead_entry)
+            break
+        sequences = [seq for seq in sequences if seq.startswith(buffer)]
+    else:
+        curses.beep()
+
+
 def async_main() -> curses_async.Coroutine[None]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
@@ -108,13 +129,17 @@ def async_main() -> curses_async.Coroutine[None]:
         stdscr.addstr(0, 0, str(counter))
         stdscr.noutrefresh()
         next_char = yield from typeahead.getch()
+        typeahead.appendleft(next_char)
         if next_char == ord(":"):
-            typeahead.appendleft(next_char)
             command = yield from get_command_in_command_line_mode(
                 message_area=message_area,
                 typeahead=typeahead,
             )
             command_map.get(command[1:-1], noop)()
+        else:
+            yield from process_command_in_normal_mode(
+                typeahead=typeahead,
+            )
 
 
 def main() -> int:
