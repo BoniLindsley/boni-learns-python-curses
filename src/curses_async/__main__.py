@@ -32,10 +32,7 @@ def stop_running_loop() -> None:
 
 class MessageArea:
     def __init__(
-        self,
-        *args: typing.Any,
-        parent: curses.window,
-        **kwargs: typing.Any,
+        self, *args: typing.Any, parent: curses.window, **kwargs: typing.Any
     ) -> None:
         super().__init__(*args, **kwargs)
         height, width = parent.getmaxyx()
@@ -58,7 +55,7 @@ class Typeahead:
         self,
         *args: typing.Any,
         getch: typing.Callable[[], curses_async.Coroutine[int]],
-        **kwargs: typing.Any,
+        **kwargs: typing.Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self._cache = collections.deque[int | str]()
@@ -141,10 +138,7 @@ def process_command_in_normal_mode(
         curses.beep()
 
 
-def refresh(
-    *,
-    window: curses.window,
-) -> collections.abc.Generator[None, None, None]:
+def refresh(*, window: curses.window) -> collections.abc.Generator[None, None, None]:
     window.clear()
     for counter in range(3):
         window.addstr(0, 0, str(counter))
