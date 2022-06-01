@@ -305,7 +305,7 @@ class EventLoop:
         stdscr = self._stdscr = curses.initscr()
         curses.noecho()
         curses.cbreak()
-        stdscr.keypad(1)
+        stdscr.keypad(True)
         curses.start_color()
         # signal.signal(signal.SIGINT, signal.SIG_IGN)
         return stdscr
@@ -352,7 +352,7 @@ class EventLoop:
         stdscr = self._stdscr
         if stdscr is None:
             return
-        stdscr.keypad(0)
+        stdscr.keypad(False)
         curses.nocbreak()
         curses.echo()
         curses.endwin()
