@@ -54,10 +54,16 @@ key_map: dict[str, str] = {
 
 
 class Typeahead:
-    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+    def __init__(
+        self,
+        *args: typing.Any,
+        getch: typing.Callable[[], curses_async.Coroutine[int]],
+        **kwargs: typing.Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._cache = collections.deque[int | str]()
         self._cache_repeat_count = 0
+        self._getch = getch
 
     def getch(self) -> curses_async.Coroutine[int]:
         """
@@ -70,7 +76,7 @@ class Typeahead:
             pass
         self._cache_repeat_count = 0
         curses.doupdate()
-        return (yield from curses_async.get_running_loop().getch())
+        return (yield from self._getch())
 
     def popleft(self) -> int:
         """
@@ -135,15 +141,23 @@ def process_command_in_normal_mode(
         curses.beep()
 
 
+def refresh(
+    *,
+    window: curses.window,
+) -> collections.abc.Generator[None, None, None]:
+    window.clear()
+    for counter in range(3):
+        window.addstr(0, 0, str(counter))
+        window.noutrefresh()
+        yield
+
+
 def async_main() -> curses_async.Coroutine[int]:
     loop = curses_async.get_running_loop()
     stdscr = loop.open()
-    stdscr.clear()
     message_area = MessageArea(parent=stdscr)
-    typeahead = Typeahead()
-    for counter in range(3):
-        stdscr.addstr(0, 0, str(counter))
-        stdscr.noutrefresh()
+    typeahead = Typeahead(getch=loop.getch)
+    for _ in refresh(window=stdscr):
         next_char = yield from typeahead.getch()
         typeahead.appendleft(next_char)
         if next_char == ord(":"):
